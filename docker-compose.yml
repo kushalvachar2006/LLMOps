@@ -1,0 +1,44 @@
+# Credentials come from your shell or a root-level .env file (never baked into images).
+services:
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build: {context: ., target: backend}
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      CORS_ORIGINS: http://localhost:8501
+    depends_on:
+      mongo: {condition: service_healthy}
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  frontend:
+    build: {context: ., target: frontend}
+    environment:
+      API_URL: http://backend:8000
+    depends_on:
+      backend: {condition: service_healthy}
+    ports: ["8501:8501"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+volumes:
+  mongo_data:

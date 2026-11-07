@@ -1,0 +1,101 @@
+
+
+# =====================================
+# Python
+# =====================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+wheels/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+venv/
+env/
+.venv/
+ENV/
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# =====================================
+# React.js / Node.js
+# =====================================
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+.npm/
+.eslintcache
+.vite/
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# =====================================
+# Streamlit
+# =====================================
+.streamlit/secrets.toml
+.streamlit/credentials.toml
+
+# =====================================
+# IDEs & Editors
+# =====================================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# =====================================
+# Logs & Temporary Files
+# =====================================
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# =====================================
+# Model & Dataset Artifacts
+# =====================================
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.h5
+*.pkl
+*.joblib
+models/
+checkpoints/
+datasets/
+data/raw/
+
+# =====================================
+# Testing & Cache
+# =====================================
+.cache/
+.tox/
+.nox/

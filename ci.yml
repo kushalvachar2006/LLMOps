@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip, cache-dependency-path: "backend/requirements-dev.txt"}
+      - name: Install dependencies
+        run: pip install -r backend/requirements-dev.txt
+      - name: Ruff
+        run: ruff check .
+
+  test:
+    name: Tests and build validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip, cache-dependency-path: "backend/requirements-dev.txt"}
+      - name: Install dependencies
+        run: pip install -r backend/requirements-dev.txt
+      - name: Backend unit and API tests
+        run: pytest backend/tests -q
+      - name: Frontend smoke tests and deployment-file checks
+        run: pytest tests -q
+      - name: Build validation (everything compiles, the app starts from settings)
+        env:
+          LLM_PROVIDER: mock
+        run: |
+          python -m compileall -q backend/app frontend
+          cd backend && python -c "from app.main import create_app; create_app(); print('app factory OK')"
+
+  docker:
+    name: Docker images and Compose
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Validate Compose file
+        run: docker compose --env-file .env.example config --quiet
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: backend
+          load: true
+          tags: llmops-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: frontend
+          load: true
+          tags: llmops-frontend:ci
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+      - name: Smoke-test the backend container (no database needed to start)
+        run: |
+          docker run -d --name api -p 8000:8000 -e LLM_PROVIDER=mock -e MONGODB_TIMEOUT_MS=600 llmops-backend:ci
+          for i in $(seq 1 20); do curl -fsS http://localhost:8000/health && break || sleep 2; done
+          curl -fsS http://localhost:8000/health | grep -q '"api"'
+      - name: Check no secrets or .env files are inside the images
+        run: |
+          for image in llmops-backend:ci llmops-frontend:ci; do
+            docker run --rm --entrypoint sh "$image" -c 'test -z "$(find /app -name ".env*" 2>/dev/null)"'
+          done
+
+  # Optional: publish images to GitHub Container Registry. Off unless the repository
+  # variable PUBLISH_IMAGES is "true". Uses the built-in GITHUB_TOKEN (no stored credentials).
+  publish-images:
+    name: Publish images
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH_IMAGES == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: backend
+          push: true
+          tags: ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
+      - name: Push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: frontend
+          push: true
+          tags: ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
+
+  # Optional deployment template. Disabled unless the repository variable DEPLOY_ENABLED is
+  # "true", and it needs secrets you add yourself: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY.
+  # Use a GitHub Environment named "production" with required reviewers for an approval gate.
+  # A green run here only means the commands finished; the final step checks the live URL.
+  deploy:
+    name: Deploy (template)
+    needs: publish-images
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Update the server over SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > key
+          ssh -i key -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd /opt/llmops && docker compose pull && docker compose up -d"
+          rm -f key
+      - name: Verify the deployed service responds
+        env:
+          HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL }}
+        run: curl -fsS --retry 10 --retry-delay 6 "$HEALTH_URL"
