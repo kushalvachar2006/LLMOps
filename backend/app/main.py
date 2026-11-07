@@ -82,9 +82,15 @@ def create_app(
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origin_list,
-        allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
-        allow_headers=["Content-Type", "X-Provider-Api-Key", "X-Admin-Token"],
+        allow_origins=["https://llmops-kva.netlify.app"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=[
+            "Content-Type",
+            "Authorization",
+            "X-Provider-Api-Key",
+            "X-Admin-Token",
+        ],
     )
 
     @app.middleware("http")
